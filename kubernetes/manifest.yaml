@@ -1,0 +1,36 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gcp-lb-tags
+  labels:
+    app: gcp-lb-tags
+spec:
+  containers:
+    - name: gcp-lb-tags
+      image: paulczar/gcp-lb-tags
+      envFrom:
+      - configMapRef:
+          name: gcp-lb-tags-environment-vars
+      volumeMounts:
+      - name: google-credentials
+        mountPath: /google/google.json
+        subPath: google.json
+  volumes:
+  - name: google-credentials
+    secret:
+      secretName: gcp-lb-tags-google-credentials
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gcp-lb-tags-environment-vars
+  labels:
+    app: gcp-lb-tags
+data:
+  PROJECT: xxxx
+  REGION: us-central1
+  NAME: mydemo-pks-cluster1
+  ZONES: a,b,c
+  GOOGLE_APPLICATION_CREDENTIALS: /google/google.json
+  TAGS: master,mydemo
