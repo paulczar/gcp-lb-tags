@@ -16,10 +16,12 @@ spec:
       - name: google-credentials
         mountPath: /google/google.json
         subPath: google.json
+      command: ["/app/gcp-lb-tags"]
+      args: ["run", "--loop", "--name=$(NAME)", "--tags=$(TAGS)", "--region=$(REGION)", "zones=$(ZONES)", "--project=$(PROJECT)", "--network=$(NETWORK)"]
   volumes:
   - name: google-credentials
     secret:
-      secretName: gcp-lb-tags-google-credentials
+      secretName: boti-google-credentials
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -28,9 +30,10 @@ metadata:
   labels:
     app: gcp-lb-tags
 data:
-  PROJECT: xxxx
+  PROJECT: XXXX
   REGION: us-central1
   NAME: mydemo-pks-cluster1
   ZONES: a,b,c
   GOOGLE_APPLICATION_CREDENTIALS: /google/google.json
   TAGS: master,mydemo
+  NETWORK: mydemo
