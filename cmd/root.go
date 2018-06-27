@@ -26,7 +26,7 @@ import (
 
 var (
 	cfgFile       string
-	requiredFlags = []string{"tags", "name", "project", "network"}
+	requiredFlags = []string{"name", "project", "network"}
 	config        = &util.Config{}
 )
 
@@ -68,6 +68,9 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&config.Name, "name", "n", "", "Name of loadbalancer")
 	rootCmd.PersistentFlags().StringVar(&config.Network, "network", "", "GCP network")
 	rootCmd.PersistentFlags().StringSliceP("tags", "t", []string{}, "Tags to Load Balance for")
+	rootCmd.PersistentFlags().StringSliceP("labels", "l", []string{}, "Labels to Load Balance for")
+	rootCmd.PersistentFlags().StringVar(&config.Address, "address", "", "Name of the external IP address to attach to LB if different to LB name")
+	rootCmd.PersistentFlags().StringSlice("ports", []string{"8443"}, "Ports to load balance for")
 	rootCmd.PersistentFlags().StringSliceP("zones", "z", []string{"a", "b", "c"}, "zones your compute instances are in (will be appended to value of --region")
 	for _, f := range requiredFlags {
 		rootCmd.MarkPersistentFlagRequired(f)

@@ -22,7 +22,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var loop bool
+var (
+	loop    bool
+	seconds int
+)
 
 // runCmd represents the run command
 var runCmd = &cobra.Command{
@@ -37,12 +40,23 @@ match that those tags.`,
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		config.Tags = util.GetFlagStringSlice(cmd, "tags")
+		config.Labels = util.GetFlagStringSlice(cmd, "labels")
+		// Ensure one, and only one of labels or tags is set.
+		if len(config.Tags) > 0 && len(config.Labels) > 0 {
+			return fmt.Errorf("Can only set one of --tags or --labels")
+		} else if len(config.Tags) == 0 && len(config.Labels) == 0 {
+			return fmt.Errorf("Must set one of --tags or --labels")
+		}
+		config.Ports = util.GetFlagStringSlice(cmd, "ports")
 		config.Zones = util.ExpandZones(config, util.GetFlagStringSlice(cmd, "zones"))
+		if config.Address == "" {
+			config.Address = config.Name
+		}
 		fmt.Printf("Ensuring that TargetPool %s contains instances in %s with %v\n", config.Name, config.Region, config.Tags)
 		if loop {
 			for {
 				util.AddorDelInstances(config)
-				time.Sleep(120 * time.Second)
+				time.Sleep(time.Duration(seconds) * time.Second)
 			}
 		} else {
 			util.AddorDelInstances(config)
@@ -54,5 +68,6 @@ match that those tags.`,
 func init() {
 	rootCmd.AddCommand(runCmd)
 	// Here you will define your flags and configuration settings.
-	runCmd.Flags().BoolVar(&loop, "loop", false, "run in a continuous (120sec) loop")
+	runCmd.Flags().BoolVar(&loop, "loop", false, "run in a continuous [seconds] loop")
+	runCmd.Flags().IntVar(&seconds, "seconds", 120, "how long between each loop in seconds")
 }
