@@ -34,14 +34,14 @@ func AddorDelInstances(config *Config) error {
 	}
 	if len(config.Tags) > 0 {
 		fmt.Printf("Collecting list of instances with tags %v:", config.Tags)
-		mi, _ := GetInstancesWithTags(config)
+		mi, _ = GetInstancesWithTags(config)
 		for _, i := range mi {
 			fmt.Printf(" %s", i.Name)
 		}
 		fmt.Println()
 	} else {
 		fmt.Printf("Collecting list of instances with labels %v:", config.Labels)
-		mi, _ := GetInstancesWithLabels(config)
+		mi, _ = GetInstancesWithLabels(config)
 		for _, i := range mi {
 			fmt.Printf(" %s", i.Name)
 		}
@@ -154,7 +154,7 @@ func GetInstancesWithTags(c *Config) ([]*compute.Instance, error) {
 	return instances, nil
 }
 
-// GetInstancesWithLabels lists instances with a specific set of tags
+// GetInstancesWithLabels lists instances with a specific set of labels
 func GetInstancesWithLabels(c *Config) ([]*compute.Instance, error) {
 	var instances []*compute.Instance
 	var foundLabels []string
@@ -167,10 +167,12 @@ func GetInstancesWithLabels(c *Config) ([]*compute.Instance, error) {
 	for _, z := range c.Zones {
 		res, _ := client.ListInstances(z)
 		for _, v := range res.Items {
-			for _, t := range v.Labels {
+			//fmt.Printf("checking %s for labels %v", v.Name, c.Labels)
+			for l, t := range v.Labels {
 				for _, i := range c.Labels {
-					if i == t {
-						foundLabels = append(foundLabels, t)
+					label := l + ":" + t
+					if i == label {
+						foundLabels = append(foundLabels, label)
 						continue
 					}
 				}
@@ -185,6 +187,7 @@ func GetInstancesWithLabels(c *Config) ([]*compute.Instance, error) {
 }
 
 func compareTags(a, b []string) bool {
+	//fmt.Printf("comparing %v to %v\n", a, b)
 	if len(a) != len(b) {
 		return false
 	}
