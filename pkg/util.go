@@ -11,22 +11,10 @@ import (
 	compute "google.golang.org/api/compute/v1"
 )
 
-type Config struct {
-	Name      string
-	Tags      []string
-	Labels    []string
-	Region    string
-	Zones     []string
-	ProjectID string
-	Network   string
-	Ports     []string
-	Address   string
-}
-
 //var config = &Config{}
 
 //AddorDelInstances Add or delete instances from targetpool
-func AddorDelInstances(config *Config) error {
+func AddorDelInstances(config *cloud.Config) error {
 	var mi []*compute.Instance
 	client, err := cloud.New(config.ProjectID, config.Network, config.Zones)
 	if err != nil {
@@ -106,7 +94,7 @@ func GetFlagStringSlice(cmd *cobra.Command, flag string) []string {
 }
 
 // ExpandZones combines the region with the zone shorthand.
-func ExpandZones(c *Config, zones []string) []string {
+func ExpandZones(c *cloud.Config, zones []string) []string {
 	region := c.Region
 	var ezs []string
 	for _, z := range zones {
@@ -125,7 +113,7 @@ func GetInstanceNamesFromList(iList []*compute.InstanceReference) []string {
 }
 
 // GetInstancesWithTags lists instances with a specific set of tags
-func GetInstancesWithTags(c *Config) ([]*compute.Instance, error) {
+func GetInstancesWithTags(c *cloud.Config) ([]*compute.Instance, error) {
 	var instances []*compute.Instance
 	var foundTags []string
 
@@ -155,7 +143,7 @@ func GetInstancesWithTags(c *Config) ([]*compute.Instance, error) {
 }
 
 // GetInstancesWithLabels lists instances with a specific set of labels
-func GetInstancesWithLabels(c *Config) ([]*compute.Instance, error) {
+func GetInstancesWithLabels(c *cloud.Config) ([]*compute.Instance, error) {
 	var instances []*compute.Instance
 	var foundLabels []string
 

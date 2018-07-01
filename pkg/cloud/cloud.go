@@ -7,19 +7,31 @@ import (
 	compute "google.golang.org/api/compute/v1"
 )
 
+type Config struct {
+	Name      string
+	Tags      []string
+	Labels    []string
+	Region    string
+	Zones     []string
+	ProjectID string
+	Network   string
+	Ports     []string
+	Address   string
+}
+
 type instanceGroup struct {
-	// name of the instance group
-	name string
 	// map of instances in the instance group
-	instances map[string]string
+	instances []*compute.Instance
 }
 
 type gceCloud struct {
 	// GCE client
 	client *gce.GCEClient
+	config *Config
 
-	// zones available to this project
-	zones []string
+	// one instance group identifier represents n instance groups, one per available zone
+	// e.g. groups := instanceGroups["myIG"]["europe-west1-d"]
+	instanceGroups map[string]map[string]*instanceGroup
 }
 
 type loadBalancer struct {
@@ -35,6 +47,42 @@ type Cloud interface {
 	CreateFirewall(name, network string, tags, allowedPorts []string) error
 	CreateForwardingRule(region, name, address, target string, ports []string) error
 	CreatePublicIP(region, name string) (*compute.Address, error)
+	CreateLoadBalancer(cfg *Config) error
+	ListZonesInRegion(cfg *Config) ([]string, error)
+}
+
+func (c *gceCloud) CreateLoadBalancer(cfg *Config) error {
+	// First we need to make sure that an instance group exists
+	for _, z := range cfg.Zones {
+		// Get a List of instances that match tags
+		zoneInstances, err := c.client.ListInstancesInZone(z, cfg.Tags, cfg.Labels)
+		if err != nil {
+			return err
+		}
+		for _, ins := range zoneInstances.Items {
+			fmt.Printf(" %s", ins.Name)
+		}
+		fmt.Println()
+
+		if len(zoneInstances.Items) > 0 {
+			m := make(map[string]*instanceGroup, 1)
+			m[cfg.Name] = &instanceGroup{instances: zoneInstances.Items}
+			c.instanceGroups[z] = m
+			ig, err := c.client.GetInstanceGroup(cfg.ProjectID, z, cfg.Name)
+			if err != nil {
+				return err
+			}
+			if ig == nil {
+				c.client.CreateInstanceGroup(cfg.ProjectID, z, cfg.Name)
+			}
+			fmt.Printf("Instance Group %v", ig.Name)
+		}
+	}
+	return nil
+}
+
+func (c *gceCloud) ListZonesInRegion(cfg *Config) ([]string, error) {
+	return c.client.ListZonesInRegion(cfg.ProjectID, cfg.Region)
 }
 
 func (c *gceCloud) CreatePublicIP(region, name string) (*compute.Address, error) {
@@ -87,7 +135,7 @@ func (c *gceCloud) CreateForwardingRule(region, name, address, target string, po
 }
 
 func (c *gceCloud) ListInstances(z string) (*compute.InstanceList, error) {
-	zoneInstances, err := c.client.ListInstancesInZone(z)
+	zoneInstances, err := c.client.ListInstancesInZone(z, []string{}, []string{})
 	if err != nil {
 		fmt.Printf("err: %v", err)
 		return nil, err
@@ -114,7 +162,7 @@ func New(projectID string, network string, allowedZones []string) (Cloud, error)
 	}
 
 	return &gceCloud{
-		client: c,
-		zones:  allowedZones,
+		client:         c,
+		instanceGroups: make(map[string]map[string]*instanceGroup),
 	}, nil
 }

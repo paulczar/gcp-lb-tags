@@ -19,7 +19,7 @@ import (
 	"os"
 
 	homedir "github.com/mitchellh/go-homedir"
-	"github.com/paulczar/gcp-lb-tags/pkg"
+	"github.com/paulczar/gcp-lb-tags/pkg/cloud"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -27,7 +27,7 @@ import (
 var (
 	cfgFile       string
 	requiredFlags = []string{"name", "project", "network"}
-	config        = &util.Config{}
+	config        = &cloud.Config{}
 )
 
 const ()

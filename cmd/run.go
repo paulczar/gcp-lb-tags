@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/paulczar/gcp-lb-tags/pkg"
+	"github.com/paulczar/gcp-lb-tags/pkg/cloud"
 	"github.com/spf13/cobra"
 )
 
@@ -27,9 +28,9 @@ var (
 	seconds int
 )
 
-// runCmd represents the run command
-var runCmd = &cobra.Command{
-	Use:   "run",
+// createCmd represents the run command
+var createCmd = &cobra.Command{
+	Use:   "create",
 	Short: "updates GCP load balancer based on instance tags",
 	Long: `
 gcp-lb-tags accepts a list of tags and will monitor a named load balancer's target
@@ -48,26 +49,33 @@ match that those tags.`,
 			return fmt.Errorf("Must set one of --tags or --labels")
 		}
 		config.Ports = util.GetFlagStringSlice(cmd, "ports")
-		config.Zones = util.ExpandZones(config, util.GetFlagStringSlice(cmd, "zones"))
 		if config.Address == "" {
 			config.Address = config.Name
 		}
-		fmt.Printf("Ensuring that TargetPool %s contains instances in %s with %v\n", config.Name, config.Region, config.Tags)
+		//fmt.Printf("Ensuring that TargetPool %s contains instances in %s with %v\n", config.Name, config.Region, config.Tags)
+		client, err := cloud.New(config.ProjectID, config.Network, config.Zones)
+		if err != nil {
+			panic(err)
+		}
+		config.Zones, err = client.ListZonesInRegion(config)
+		if err != nil {
+			return err
+		}
 		if loop {
 			for {
 				util.AddorDelInstances(config)
 				time.Sleep(time.Duration(seconds) * time.Second)
 			}
 		} else {
-			util.AddorDelInstances(config)
+			//fmt.Printf("zones: %v", config.Zones)
+			return client.CreateLoadBalancer(config)
 		}
-		return nil
 	},
 }
 
 func init() {
-	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(createCmd)
 	// Here you will define your flags and configuration settings.
-	runCmd.Flags().BoolVar(&loop, "loop", false, "run in a continuous [seconds] loop")
-	runCmd.Flags().IntVar(&seconds, "seconds", 120, "how long between each loop in seconds")
+	createCmd.Flags().BoolVar(&loop, "loop", false, "run in a continuous [seconds] loop")
+	createCmd.Flags().IntVar(&seconds, "seconds", 120, "how long between each loop in seconds")
 }

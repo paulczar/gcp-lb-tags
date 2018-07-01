@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -52,10 +53,64 @@ func makeNetworkURL(project string, network string) string {
 	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/global/networks/%s", project, network)
 }
 
+// ListZonesInRegion gets a list of zones in a given region
+func (gce *GCEClient) ListZonesInRegion(project, region string) ([]string, error) {
+	var zones []string
+	r, err := gce.service.Regions.Get(project, region).Do()
+	if err != nil {
+		return nil, err
+	}
+	for _, z := range r.Zones {
+		zones = append(zones, path.Base(z))
+	}
+	return zones, nil
+}
+
+// GetInstanceGroup returns an instance group by name
+func (gce *GCEClient) GetInstanceGroup(project, zone, name string) (*compute.InstanceGroup, error) {
+	ig, err := gce.service.InstanceGroups.Get(project, zone, name).Do()
+	if err != nil {
+		if isHTTPErrorCode(err, 404) {
+			return nil, nil
+		} else {
+			return nil, err
+		}
+	}
+	return ig, nil
+}
+
+// CreateInstanceGroup returns an instance group by name
+func (gce *GCEClient) CreateInstanceGroup(project, zone, name string) (*compute.InstanceGroup, error) {
+	ig := &compute.InstanceGroup{
+		Name: name,
+		Zone: zone,
+	}
+	op, err := gce.service.InstanceGroups.Insert(project, zone, ig).Do()
+	if err != nil {
+		return nil, err
+	}
+	if err = gce.waitForZoneOp(op, zone); err != nil {
+		return nil, err
+	}
+	a, err := gce.GetInstanceGroup(project, zone, name)
+	if err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
 // ListInstancesInZone returns all instances in a zone
-func (gce *GCEClient) ListInstancesInZone(zone string) (*compute.InstanceList, error) {
+func (gce *GCEClient) ListInstancesInZone(zone string, tags, labels []string) (*compute.InstanceList, error) {
+	var filter string
 	//fmt.Printf("fetching instances in %s\n", zone)
-	return gce.service.Instances.List(gce.projectID, zone).Do()
+	list := gce.service.Instances.List(gce.projectID, zone)
+	for _, l := range labels {
+		s := strings.Split(l, ":")
+		filter = "labels." + s[0] + " eq '" + s[1] + "'" //"job:master"
+		list.Filter(filter)
+	}
+	// TODO implement tag filter
+	return list.Do()
 }
 
 // AddInstanceToTargetPool returns all instances in a zone
@@ -224,6 +279,12 @@ func (gce *GCEClient) waitForGlobalOp(op *compute.Operation) error {
 func (gce *GCEClient) waitForRegionOp(op *compute.Operation, region string) error {
 	return waitForOp(op, func(operationName string) (*compute.Operation, error) {
 		return gce.service.RegionOperations.Get(gce.projectID, region, operationName).Do()
+	})
+}
+
+func (gce *GCEClient) waitForZoneOp(op *compute.Operation, zone string) error {
+	return waitForOp(op, func(operationName string) (*compute.Operation, error) {
+		return gce.service.ZoneOperations.Get(gce.projectID, zone, operationName).Do()
 	})
 }
 
