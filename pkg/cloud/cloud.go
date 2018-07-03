@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/paulczar/gcp-lb-tags/pkg/cloud/gce"
 	compute "google.golang.org/api/compute/v1"
@@ -12,26 +13,23 @@ type Config struct {
 	Tags      []string
 	Labels    []string
 	Region    string
-	Zones     []string
 	ProjectID string
 	Network   string
 	Ports     []string
+	Port      string
 	Address   string
-}
-
-type instanceGroup struct {
-	// map of instances in the instance group
-	instances []*compute.Instance
+	Zones     []string
 }
 
 type gceCloud struct {
 	// GCE client
 	client *gce.GCEClient
-	config *Config
 
-	// one instance group identifier represents n instance groups, one per available zone
-	// e.g. groups := instanceGroups["myIG"]["europe-west1-d"]
-	instanceGroups map[string]map[string]*instanceGroup
+	zones []string
+	// instances per zone
+	// e.g. groups := instances["europe-west1-d"]
+	instancesInZone map[string][]*compute.Instance
+	instanceGroups  map[string][]*compute.InstanceWithNamedPorts
 }
 
 type loadBalancer struct {
@@ -40,42 +38,204 @@ type loadBalancer struct {
 
 // Cloud interface
 type Cloud interface {
-	ListInstances(zone string) (*compute.InstanceList, error)
-	GetTargetPool(region, name string) (*compute.TargetPool, error)
-	AddInstanceToTargetPool(region, name string, toAdd []*compute.InstanceReference) error
-	DeleteInstanceFromTargetPool(region, name string, toAdd []*compute.InstanceReference) error
-	CreateFirewall(name, network string, tags, allowedPorts []string) error
-	CreateForwardingRule(region, name, address, target string, ports []string) error
-	CreatePublicIP(region, name string) (*compute.Address, error)
 	CreateLoadBalancer(cfg *Config) error
-	ListZonesInRegion(cfg *Config) ([]string, error)
 }
 
 func (c *gceCloud) CreateLoadBalancer(cfg *Config) error {
-	// First we need to make sure that an instance group exists
-	for _, z := range cfg.Zones {
-		// Get a List of instances that match tags
-		zoneInstances, err := c.client.ListInstancesInZone(z, cfg.Tags, cfg.Labels)
-		if err != nil {
+	var err error
+	fmt.Printf("Creating a Loadbalancer for instances with labels %s\n", strings.Join(cfg.Labels, ", "))
+	fmt.Printf("--> Updating instance groups %s in zones %s\n", cfg.Name, strings.Join(c.zones, ", "))
+	err = c.configureInstanceGroups(cfg)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("--> Updating Public IP")
+	address, err := c.CreatePublicIP(cfg.Region, cfg.Address)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf(" %s\n", address.Address)
+
+	// create or update firewall rule
+	// try to update first
+	if err := c.client.UpdateFirewall(cfg.Name, cfg.Network, cfg.Port, cfg.Tags); err != nil {
+		// couldn't update most probably because firewall didn't exist
+		if err := c.client.CreateFirewall(cfg.Name, cfg.Network, cfg.Port, cfg.Tags); err != nil {
+			// couldn't update or create
 			return err
 		}
-		for _, ins := range zoneInstances.Items {
-			fmt.Printf(" %s", ins.Name)
-		}
-		fmt.Println()
+	}
+	fmt.Println("Created/updated firewall rule with success.")
 
-		if len(zoneInstances.Items) > 0 {
-			m := make(map[string]*instanceGroup, 1)
-			m[cfg.Name] = &instanceGroup{instances: zoneInstances.Items}
-			c.instanceGroups[z] = m
+	// ensure health checks are set up
+	fmt.Println("--> Updating Health Check")
+	for _, port := range cfg.Ports {
+		if err := c.client.UpdateHealthCheck(cfg.Name, port); err != nil {
+			// couldn't update most probably because health-check didn't exist
+			if err := c.client.CreateHealthCheck(cfg.Name, port); err != nil {
+				// couldn't update or create
+				return err
+			} else {
+				fmt.Printf("====> Created Health check for port %s\n", port)
+			}
+		} else {
+			fmt.Printf("====> Updated Health check for port %s\n", port)
+		}
+	}
+
+	fmt.Println("--> Updating Backend Services")
+	// create or update backend service, only for allowed zones
+	// try to update first
+	if err := c.client.UpdateBackendService(cfg.Name, cfg.Port, c.zones); err != nil {
+		// couldn't update most probably because backend service didn't exist
+		//return err
+		if err := c.client.CreateBackendService(cfg.Name, cfg.Port, c.zones); err != nil {
+			// couldn't update or create
+			return err
+		}
+	}
+	fmt.Println("====> Created/updated backend service with success.")
+
+	fmt.Printf("--> Updating Forwarding Rule")
+	err = c.CreateForwardingRule(cfg.Region, cfg.Name, address.SelfLink, cfg.Port)
+	if err != nil {
+		panic(err)
+	}
+
+	return nil
+}
+
+func (c *gceCloud) configureInstanceGroups(cfg *Config) error {
+	var err error
+
+	// get list of instances in the zone
+	err = c.listInstancesPerZone(cfg)
+	if err != nil {
+		return err
+	}
+	// get list if instances in the instance group in the zone
+	err = c.listInstancesInInstanceGroups(cfg)
+	if err != nil {
+		return err
+	}
+	//fmt.Printf("instances in zone: %#v", c.instancesInZone)
+	for _, z := range c.zones {
+		//fmt.Printf("Compare %v to %v\n", c.instanceGroups[z], c.instancesInZone[z])
+		instancesInZone := []string{}
+		instancesInIG := []string{}
+		toAdd := []*compute.InstanceReference{}
+		toDel := []*compute.InstanceReference{}
+		fmt.Printf("====> Looking at instances in zone %s\n", z)
+		if len(c.instancesInZone[z]) == 0 && len(c.instanceGroups[z]) == 0 {
+			fmt.Printf("No instances found in zone, do nothing\n")
+			continue
+		}
+		for _, i := range c.instancesInZone[z] {
+			instancesInZone = append(instancesInZone, i.SelfLink)
+		}
+		for _, i := range c.instanceGroups[z] {
+			instancesInIG = append(instancesInIG, i.Instance)
+		}
+
+		// create list of Instances in Zone, but not in IG
+		for _, i := range instancesInZone {
+			found := false
+			for _, c := range instancesInIG {
+				if i == c {
+					found = true
+					continue
+				}
+			}
+			if !found {
+				fmt.Printf("Need to add %s to Instance Group\n", i)
+				toAdd = append(toAdd, &compute.InstanceReference{Instance: i})
+			}
+		}
+
+		// create list of Instances in IG but not in Zone
+		for _, i := range instancesInIG {
+			found := false
+			for _, c := range instancesInZone {
+				if i == c {
+					found = true
+					continue
+				}
+			}
+			if !found {
+				fmt.Printf("Need to remove %s from Instance Group\n", i)
+				toDel = append(toDel, &compute.InstanceReference{Instance: i})
+			}
+		}
+
+		// Add and Delete Instances in Instance Groups
+		if len(toAdd) > 0 {
+			err = c.client.AddInstancesToInstanceGroup(cfg.Name, z, toAdd)
+			if err != nil {
+				return err
+			}
+		}
+		if len(toDel) > 0 {
+			err = c.client.RemoveInstancesFromInstanceGroup(cfg.Name, z, toDel)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	// update list of instances in the instance groups
+	err = c.listInstancesInInstanceGroups(cfg)
+	if err != nil {
+		return err
+	}
+	for z, i := range c.instanceGroups {
+		if len(i) == 0 {
 			ig, err := c.client.GetInstanceGroup(cfg.ProjectID, z, cfg.Name)
 			if err != nil {
 				return err
 			}
-			if ig == nil {
-				c.client.CreateInstanceGroup(cfg.ProjectID, z, cfg.Name)
+			if ig != nil {
+				fmt.Printf("Delete instance group %s in zone %s as it is empty.\n", cfg.Name, z)
+				c.client.DeleteInstanceGroup(cfg.ProjectID, z, cfg.Name)
 			}
-			fmt.Printf("Instance Group %v", ig.Name)
+		}
+	}
+	return nil
+}
+
+func (c *gceCloud) listInstancesPerZone(cfg *Config) error {
+	// First we need to make sure that an instance group exists
+	for _, z := range c.zones {
+		// Get a List of instances that match tags
+		zi, err := c.client.ListInstancesInZone(z, cfg.Tags, cfg.Labels)
+		if err != nil {
+			return err
+		}
+		c.instancesInZone[z] = zi.Items
+	}
+	return nil
+}
+
+func (c *gceCloud) listInstancesInInstanceGroups(cfg *Config) error {
+	for _, z := range c.zones {
+		// fetch instance group for the zone
+		ig, err := c.client.GetInstanceGroup(cfg.ProjectID, z, cfg.Name)
+		if err != nil {
+			return err
+		}
+
+		// if instance group doesn't exist move to next zone
+		if ig == nil {
+			c.instanceGroups[z] = nil
+			continue
+		}
+
+		// Fetch list of instances in instance group for the zone
+		igl, err := c.client.ListInstancesInInstanceGroupForZone(cfg.Name, z)
+		if igl != nil {
+			c.instanceGroups[z] = igl.Items
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -91,11 +251,11 @@ func (c *gceCloud) CreatePublicIP(region, name string) (*compute.Address, error)
 		return nil, err
 	}
 	if a == nil {
-		fmt.Printf("No. Will create it. ")
+		//		fmt.Printf("No. Will create it. ")
 		a, err := c.client.CreateExternalIP(region, name)
 		return a, err
 	}
-	fmt.Printf("Yes. ")
+	//	fmt.Printf("Yes. ")
 	return a, nil
 }
 
@@ -109,25 +269,14 @@ func (c *gceCloud) DeleteInstanceFromTargetPool(region, name string, toAdd []*co
 	return err
 }
 
-func (c *gceCloud) CreateFirewall(name, network string, tags, allowedPorts []string) error {
-	exists, _ := c.client.GetFirewall(name)
-	if exists == false {
-		fmt.Println("No.  creating")
-		err := c.client.CreateFirewall(name, network, tags, allowedPorts)
-		return err
-	}
-	fmt.Println("Yes")
-	return nil
-}
-
-func (c *gceCloud) CreateForwardingRule(region, name, address, target string, ports []string) error {
+func (c *gceCloud) CreateForwardingRule(region, name, address string, port string) error {
 	fr, err := c.client.GetForwardingRule(region, name)
 	if err != nil {
 		return err
 	}
 	if fr == nil {
 		fmt.Println("No, creating")
-		err = c.client.CreateForwardingRule(region, name, address, target, ports)
+		err = c.client.CreateForwardingRule(region, name, address, port)
 		return err
 	}
 	fmt.Println("Yes")
@@ -154,15 +303,21 @@ func (c *gceCloud) GetTargetPool(region, name string) (*compute.TargetPool, erro
 }
 
 // New cloud interface
-func New(projectID string, network string, allowedZones []string) (Cloud, error) {
+func New(projectID string, network string, region string) (Cloud, error) {
 	// try and provision GCE client
 	c, err := gce.CreateGCECloud(projectID, network)
 	if err != nil {
 		return nil, err
 	}
+	zones, err := c.ListZonesInRegion(projectID, region)
+	if err != nil {
+		return nil, err
+	}
 
 	return &gceCloud{
-		client:         c,
-		instanceGroups: make(map[string]map[string]*instanceGroup),
+		client:          c,
+		zones:           zones,
+		instancesInZone: make(map[string][]*compute.Instance),
+		instanceGroups:  make(map[string][]*compute.InstanceWithNamedPorts),
 	}, nil
 }

@@ -42,28 +42,20 @@ match that those tags.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		config.Tags = util.GetFlagStringSlice(cmd, "tags")
 		config.Labels = util.GetFlagStringSlice(cmd, "labels")
-		// Ensure one, and only one of labels or tags is set.
-		if len(config.Tags) > 0 && len(config.Labels) > 0 {
-			return fmt.Errorf("Can only set one of --tags or --labels")
-		} else if len(config.Tags) == 0 && len(config.Labels) == 0 {
-			return fmt.Errorf("Must set one of --tags or --labels")
-		}
-		config.Ports = util.GetFlagStringSlice(cmd, "ports")
 		if config.Address == "" {
 			config.Address = config.Name
 		}
-		//fmt.Printf("Ensuring that TargetPool %s contains instances in %s with %v\n", config.Name, config.Region, config.Tags)
-		client, err := cloud.New(config.ProjectID, config.Network, config.Zones)
+		client, err := cloud.New(config.ProjectID, config.Network, config.Region)
 		if err != nil {
 			panic(err)
 		}
-		config.Zones, err = client.ListZonesInRegion(config)
-		if err != nil {
-			return err
-		}
+		config.Zones = nil
 		if loop {
 			for {
-				util.AddorDelInstances(config)
+				err := client.CreateLoadBalancer(config)
+				if err != nil {
+					fmt.Printf("An error Occured: %s\n\n\n", err)
+				}
 				time.Sleep(time.Duration(seconds) * time.Second)
 			}
 		} else {

@@ -1,6 +1,6 @@
 # GCP-LB-TAGS maitains a Google Load Balancer Target Pool based on matching instance tags.
 
-Given an existing Load Balancer, will keep it's target pool updated to contain all instances that match a set of tags in your given region and zones.
+Given an existing Load Balancer, will keep it's target pool updated to contain all instances that match a set of labels in your given region and zones.
 
 ## Usage
 
@@ -14,7 +14,7 @@ $ ./gcp-lb-tags run --name mydemo-pks-cluster1 --project pgtm-pczarkowski --tags
 Ensuring that TargetPool mydemo-pks-cluster1 contains instances in us-central1 with [master mydemo]
 ```
 
-#### Kubernetes
+### Kubernetes
 
 Create a Kubernetes secret from a google auth file:
 
@@ -42,3 +42,8 @@ $ kc logs -f gcp-lb-tags
 2018/06/14 21:41:40 need to add instance "https://www.googleapis.com/compute/v1/projects/pgtm-XXX/zones/us-central1-a/instances/vm-55fb5210-58bd-4427-6b85-7dc815d13f12" to target pool
 2018/06/14 21:41:40 need to add [0xc42029aa00] and delete [] from targetpool
 ```
+
+## Thanks
+
+Thanks to the author of https://github.com/pires/consul-lb-gce (also Apache licensed) for usable snippets of code for dealing with
+various google cloud resources.
