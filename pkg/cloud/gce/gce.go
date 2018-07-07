@@ -180,16 +180,30 @@ func (gce *GCEClient) ListInstancesInZone(zone string, tags, labels []string) (*
 	return list.Do()
 }
 
-// AddInstanceToTargetPool returns all instances in a zone
-func (gce *GCEClient) AddInstanceToTargetPool(region, name string, toAdd []*compute.InstanceReference) (*compute.Operation, error) {
+// AddInstanceToTargetPool adds instances to the targetpool
+func (gce *GCEClient) AddInstanceToTargetPool(region, name string, toAdd []*compute.InstanceReference) error {
 	add := &compute.TargetPoolsAddInstanceRequest{Instances: toAdd}
-	return gce.service.TargetPools.AddInstance(gce.projectID, region, name, add).Do()
+	op, err := gce.service.TargetPools.AddInstance(gce.projectID, region, name, add).Do()
+	if err != nil {
+		return err
+	}
+	if err = gce.waitForRegionOp(op, region); err != nil {
+		return err
+	}
+	return nil
 }
 
-// DeleteInstanceFromTargetPool returns all instances in a zone
-func (gce *GCEClient) DeleteInstanceFromTargetPool(region, name string, toDel []*compute.InstanceReference) (*compute.Operation, error) {
+// DeleteInstanceFromTargetPool deletes instances from the targetpool
+func (gce *GCEClient) DeleteInstanceFromTargetPool(region, name string, toDel []*compute.InstanceReference) error {
 	del := &compute.TargetPoolsRemoveInstanceRequest{Instances: toDel}
-	return gce.service.TargetPools.RemoveInstance(gce.projectID, region, name, del).Do()
+	op, err := gce.service.TargetPools.RemoveInstance(gce.projectID, region, name, del).Do()
+	if err != nil {
+		return err
+	}
+	if err = gce.waitForRegionOp(op, region); err != nil {
+		return err
+	}
+	return nil
 }
 
 // GetExternalIP confirms that the named External IP exists
@@ -232,7 +246,7 @@ func (gce *GCEClient) GetTargetPool(region, name string) (*compute.TargetPool, e
 	tp, err := gce.service.TargetPools.Get(gce.projectID, region, name).Do()
 	if err != nil {
 		if isHTTPErrorCode(err, 404) {
-			tp, err = gce.CreateTargetPool(region, name)
+			tp, err = gce.CreateTargetPool(region, name, []string{})
 			if err != nil {
 				return nil, err
 			} else {
@@ -245,10 +259,12 @@ func (gce *GCEClient) GetTargetPool(region, name string) (*compute.TargetPool, e
 	return tp, nil
 }
 
-func (gce *GCEClient) CreateTargetPool(region, name string) (*compute.TargetPool, error) {
+//CreateTargetPool creates a targetpool
+func (gce *GCEClient) CreateTargetPool(region, name string, instances []string) (*compute.TargetPool, error) {
 	rule := &compute.TargetPool{
-		Name:   name,
-		Region: region,
+		Name:      name,
+		Region:    region,
+		Instances: instances,
 	}
 	op, err := gce.service.TargetPools.Insert(gce.projectID, region, rule).Do()
 	if err != nil {
@@ -284,11 +300,12 @@ func (gce *GCEClient) GetForwardingRule(region, name string) (*compute.Forwardin
 // CreateForwardingRule creates and returns a GlobalForwardingRule that points to the given TargetHttpProxy.
 func (gce *GCEClient) CreateForwardingRule(region, name, address, port string) error {
 	//thp, _ := gce.GetTargetHttpProxy(name)
+	bs, _ := gce.GetBackendService(name)
 	rule := &compute.ForwardingRule{
 		Name:           name,
 		IPProtocol:     "TCP",
 		Ports:          []string{port},
-		BackendService: name,
+		BackendService: bs.SelfLink,
 		IPAddress:      address,
 	}
 	fmt.Printf("creating forwarding rule...")

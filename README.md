@@ -1,6 +1,6 @@
 # GCP-LB-TAGS maitains a Google Load Balancer Target Pool based on matching instance tags.
 
-Given an existing Load Balancer, will keep it's target pool updated to contain all instances that match a set of labels in your given region and zones.
+Given an existing Load Balancer, will keep it's target pool updated to contain all instances that match a set of labels in your given region and zones.  Currently only deals with basic TCP load balancing.
 
 ## Usage
 
