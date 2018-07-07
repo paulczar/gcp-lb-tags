@@ -171,11 +171,13 @@ func (gce *GCEClient) ListInstancesInZone(zone string, tags, labels []string) (*
 	var filter string
 	//fmt.Printf("fetching instances in %s\n", zone)
 	list := gce.service.Instances.List(gce.projectID, zone)
+	filters := []string{}
 	for _, l := range labels {
 		s := strings.Split(l, ":")
-		filter = "labels." + s[0] + " eq '" + s[1] + "'" //"job:master"
-		list.Filter(filter)
+		filter = "(labels." + s[0] + " eq '" + s[1] + "')" //"job:master"
+		filters = append(filters, filter)
 	}
+	list.Filter(strings.Join(filters, ""))
 	// TODO implement tag filter
 	return list.Do()
 }
@@ -246,14 +248,7 @@ func (gce *GCEClient) GetTargetPool(region, name string) (*compute.TargetPool, e
 	tp, err := gce.service.TargetPools.Get(gce.projectID, region, name).Do()
 	if err != nil {
 		if isHTTPErrorCode(err, 404) {
-			tp, err = gce.CreateTargetPool(region, name, []string{})
-			if err != nil {
-				return nil, err
-			} else {
-				return nil, nil
-			}
-		} else {
-			panic(err)
+			return nil, nil
 		}
 	}
 	return tp, nil
@@ -300,13 +295,16 @@ func (gce *GCEClient) GetForwardingRule(region, name string) (*compute.Forwardin
 // CreateForwardingRule creates and returns a GlobalForwardingRule that points to the given TargetHttpProxy.
 func (gce *GCEClient) CreateForwardingRule(region, name, address, port string) error {
 	//thp, _ := gce.GetTargetHttpProxy(name)
-	bs, _ := gce.GetBackendService(name)
+	t, _ := gce.GetTargetPool(region, name)
+	if t == nil {
+		return fmt.Errorf("Could not get targetpool %s", name)
+	}
 	rule := &compute.ForwardingRule{
-		Name:           name,
-		IPProtocol:     "TCP",
-		Ports:          []string{port},
-		BackendService: bs.SelfLink,
-		IPAddress:      address,
+		Name:       name,
+		IPProtocol: "TCP",
+		PortRange:  port,
+		Target:     t.SelfLink,
+		IPAddress:  address,
 	}
 	fmt.Printf("creating forwarding rule...")
 	op, err := gce.service.ForwardingRules.Insert(gce.projectID, region, rule).Do()

@@ -118,34 +118,31 @@ func (c *gceCloud) configureInstanceGroups(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	// get list if instances in the instance group in the zone
-	err = c.listInstancesInInstanceGroups(cfg)
-	if err != nil {
-		return err
+
+	// get all the instances across all the zones
+	instancesInZones := []string{}
+	for _, z := range c.zones {
+		for _, i := range c.instancesInZone[z] {
+			instancesInZones = append(instancesInZones, i.SelfLink)
+		}
 	}
+
 	// get list of instances in targetpool
 	tp, err := c.client.GetTargetPool(cfg.Region, cfg.Name)
 	if err != nil {
 		return err
 	}
-	instancesInTargetPool := tp.Instances
-	//fmt.Printf("instances in zone: %#v", c.instancesInZone)
-	for _, z := range c.zones {
-		//fmt.Printf("Compare %v to %v\n", c.instanceGroups[z], c.instancesInZone[z])
-		instancesInZone := []string{}
+	if tp == nil {
+		tp, err = c.client.CreateTargetPool(cfg.Region, cfg.Name, instancesInZones)
+		if err != nil {
+			return err
+		}
+	} else {
+		instancesInTargetPool := tp.Instances
 		toAdd := []*compute.InstanceReference{}
 		toDel := []*compute.InstanceReference{}
-		fmt.Printf("====> Looking at instances in zone %s\n", z)
-		if len(c.instancesInZone[z]) == 0 && len(c.instanceGroups[z]) == 0 {
-			fmt.Printf("No instances found in zone, do nothing\n")
-			continue
-		}
-		for _, i := range c.instancesInZone[z] {
-			instancesInZone = append(instancesInZone, i.SelfLink)
-		}
-
 		// create list of Instances in Zone, but not in IG
-		for _, i := range instancesInZone {
+		for _, i := range instancesInZones {
 			found := false
 			for _, c := range instancesInTargetPool {
 				if i == c {
@@ -158,11 +155,10 @@ func (c *gceCloud) configureInstanceGroups(cfg *Config) error {
 				toAdd = append(toAdd, &compute.InstanceReference{Instance: i})
 			}
 		}
-
 		// create list of Instances in IG but not in Zone
 		for _, i := range instancesInTargetPool {
 			found := false
-			for _, c := range instancesInZone {
+			for _, c := range instancesInZones {
 				if i == c {
 					found = true
 					continue
@@ -185,23 +181,6 @@ func (c *gceCloud) configureInstanceGroups(cfg *Config) error {
 			err = c.client.DeleteInstanceFromTargetPool(cfg.Region, cfg.Name, toDel)
 			if err != nil {
 				return err
-			}
-		}
-	}
-	// update list of instances in the TargetPool
-	err = c.listInstancesInInstanceGroups(cfg)
-	if err != nil {
-		return err
-	}
-	for z, i := range c.instanceGroups {
-		if len(i) == 0 {
-			ig, err := c.client.GetInstanceGroup(cfg.ProjectID, z, cfg.Name)
-			if err != nil {
-				return err
-			}
-			if ig != nil {
-				fmt.Printf("Delete instance group %s in zone %s as it is empty.\n", cfg.Name, z)
-				c.client.DeleteInstanceGroup(cfg.ProjectID, z, cfg.Name)
 			}
 		}
 	}
