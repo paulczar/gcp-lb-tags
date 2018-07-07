@@ -1,6 +1,8 @@
-# GCP-LB-TAGS maitains a Google Load Balancer Target Pool based on matching instance tags.
+# GCP-LB-LABELS maitains a Google Load Balancer Target Pool based on matching instance labels.
 
-Given an existing Load Balancer, will keep it's target pool updated to contain all instances that match a set of labels in your given region and zones.  Currently only deals with basic TCP load balancing.
+Google LoadBalancing can be a frustrating thing to do, especially when not using managed instance groups.  Different protocols require different google resources (forwarding rule, targetpools, backends, healthchecks, etc) and can be difficult to figure out what to use when.  More-over keeping them up to date when instances are created/removed can be troublesome as well.  This attempts to solve that problem.
+
+Currently only supporting bare TCP protocol (as its sort of the easiest, but also what I needed right away).
 
 ## Usage
 
@@ -10,8 +12,13 @@ If running on a GCP instance it should auth automatically, if running locally yo
 
 ```
 $ export GOOGLE_APPLICATION_CREDENTIALS=./google.json
-$ ./gcp-lb-tags run --name mydemo-pks-cluster1 --project pgtm-pczarkowski --tags master,mydemo --network mydemo
-Ensuring that TargetPool mydemo-pks-cluster1 contains instances in us-central1 with [master mydemo]
+$ ./gcp-lb-tags run --name mydemo --project XXXX --labels job:web --network mydemo
+--> Updating instance groups mydemo in zones us-central1-a, us-central1-b, us-central1-c, us-central1-f
+--> Updating Public IP
+ 35.193.26.XX
+Created/updated firewall rule with success.
+--> Updating Forwarding RuleNo, creating
+creating forwarding rule......Done!
 ```
 
 ### Kubernetes

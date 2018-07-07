@@ -293,11 +293,11 @@ func (gce *GCEClient) GetForwardingRule(region, name string) (*compute.Forwardin
 }
 
 // CreateForwardingRule creates and returns a GlobalForwardingRule that points to the given TargetHttpProxy.
-func (gce *GCEClient) CreateForwardingRule(region, name, address, port string) error {
+func (gce *GCEClient) CreateForwardingRule(region, name, address, port string) (*compute.ForwardingRule, error) {
 	//thp, _ := gce.GetTargetHttpProxy(name)
 	t, _ := gce.GetTargetPool(region, name)
 	if t == nil {
-		return fmt.Errorf("Could not get targetpool %s", name)
+		return nil, fmt.Errorf("Could not get targetpool %s", name)
 	}
 	rule := &compute.ForwardingRule{
 		Name:       name,
@@ -306,17 +306,19 @@ func (gce *GCEClient) CreateForwardingRule(region, name, address, port string) e
 		Target:     t.SelfLink,
 		IPAddress:  address,
 	}
-	fmt.Printf("creating forwarding rule...")
 	op, err := gce.service.ForwardingRules.Insert(gce.projectID, region, rule).Do()
 	//fmt.Printf("op %v", op)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err = gce.waitForRegionOp(op, region); err != nil {
-		return err
+		return nil, err
 	}
-	fmt.Printf("...Done!")
-	return nil
+	fr, err := gce.GetForwardingRule(region, name)
+	if err != nil {
+		return nil, err
+	}
+	return fr, nil
 }
 
 // makeFirewallObject returns a pre-populated instance of *computeFirewall

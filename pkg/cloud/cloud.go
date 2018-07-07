@@ -31,6 +31,7 @@ type gceCloud struct {
 	instancesInZone       map[string][]*compute.Instance
 	instanceGroups        map[string][]*compute.InstanceWithNamedPorts
 	instancesInTargetPool []string
+	externalAddress       *compute.Address
 }
 
 type loadBalancer struct {
@@ -44,31 +45,42 @@ type Cloud interface {
 
 func (c *gceCloud) CreateLoadBalancer(cfg *Config) error {
 	var err error
-	fmt.Printf("Creating a Loadbalancer for instances with labels %s\n", strings.Join(cfg.Labels, ", "))
+	fmt.Printf("Creating a Loadbalancer for instances with labels:\n - %s\n", strings.Join(cfg.Labels, "\n - "))
 
-	fmt.Printf("--> Updating instance groups %s in zones %s\n", cfg.Name, strings.Join(c.zones, ", "))
+	fmt.Printf("--> Updating Target Pool %s\n", cfg.Name)
 	err = c.configureInstanceGroups(cfg)
 	if err != nil {
 		return err
 	}
 
-	fmt.Println("--> Updating Public IP")
-	address, err := c.CreatePublicIP(cfg.Region, cfg.Address)
+	fmt.Println("--> Creating External Address:")
+	c.externalAddress, err = c.client.GetExternalIP(cfg.Region, cfg.Name)
 	if err != nil {
-		panic(err)
+		return err
 	}
-	fmt.Printf(" %s\n", address.Address)
+	if c.externalAddress == nil {
+		fmt.Printf("====> Creating External Address:")
+		c.externalAddress, err = c.client.CreateExternalIP(cfg.Region, cfg.Name)
+		return err
+	} else {
+		fmt.Printf("====> Using Existing External Address:")
+	}
+	fmt.Printf(" %s - %s\n", cfg.Name, c.externalAddress.Address)
 
 	// create or update firewall rule
 	// try to update first
+	fmt.Println("--> Creating Firewall Rule:")
 	if err := c.client.UpdateFirewall(cfg.Name, cfg.Network, cfg.Port, cfg.Tags); err != nil {
 		// couldn't update most probably because firewall didn't exist
 		if err := c.client.CreateFirewall(cfg.Name, cfg.Network, cfg.Port, cfg.Tags); err != nil {
 			// couldn't update or create
 			return err
+		} else {
+			fmt.Printf("====> Created Firewall Rule: %s\n", cfg.Name)
 		}
+	} else {
+		fmt.Printf("====> Updated Firewall Rule: %s\n", cfg.Name)
 	}
-	fmt.Println("Created/updated firewall rule with success.")
 
 	/** No health checks for tcp based LB
 		// ensure health checks are set up
@@ -101,12 +113,19 @@ func (c *gceCloud) CreateLoadBalancer(cfg *Config) error {
 		}
 		fmt.Println("====> Created/updated backend service with success.")
 	  **/
-	fmt.Printf("--> Updating Forwarding Rule")
-	err = c.CreateForwardingRule(cfg.Region, cfg.Name, address.SelfLink, cfg.Port)
+	fmt.Println("--> Creating Forwarding Rule:")
+	fr, err := c.client.GetForwardingRule(cfg.Region, cfg.Name)
 	if err != nil {
-		panic(err)
+		return err
 	}
-
+	if fr == nil {
+		fmt.Printf("====> Creating Forwarding Rule: %s\n", cfg.Name)
+		fr, err = c.client.CreateForwardingRule(cfg.Region, cfg.Name, c.externalAddress.Address, cfg.Port)
+		return err
+	} else {
+		fmt.Printf("====> Using Existing Forwarding Rule: %s\n", cfg.Name)
+	}
+	fmt.Println("--> Done.")
 	return nil
 }
 
@@ -230,20 +249,6 @@ func (c *gceCloud) ListZonesInRegion(cfg *Config) ([]string, error) {
 	return c.client.ListZonesInRegion(cfg.ProjectID, cfg.Region)
 }
 
-func (c *gceCloud) CreatePublicIP(region, name string) (*compute.Address, error) {
-	a, err := c.client.GetExternalIP(region, name)
-	if err != nil {
-		return nil, err
-	}
-	if a == nil {
-		//		fmt.Printf("No. Will create it. ")
-		a, err := c.client.CreateExternalIP(region, name)
-		return a, err
-	}
-	//	fmt.Printf("Yes. ")
-	return a, nil
-}
-
 func (c *gceCloud) AddInstanceToTargetPool(region, name string, toAdd []*compute.InstanceReference) error {
 	return c.client.AddInstanceToTargetPool(region, name, toAdd)
 }
@@ -253,16 +258,7 @@ func (c *gceCloud) DeleteInstanceFromTargetPool(region, name string, toAdd []*co
 }
 
 func (c *gceCloud) CreateForwardingRule(region, name, address string, port string) error {
-	fr, err := c.client.GetForwardingRule(region, name)
-	if err != nil {
-		return err
-	}
-	if fr == nil {
-		fmt.Println("No, creating")
-		err = c.client.CreateForwardingRule(region, name, address, port)
-		return err
-	}
-	fmt.Println("Yes")
+
 	return nil
 }
 
