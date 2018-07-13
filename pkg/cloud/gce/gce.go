@@ -243,6 +243,18 @@ func (gce *GCEClient) CreateExternalIP(region, name string) (*compute.Address, e
 	return a, nil
 }
 
+// RemoveExternalIP deletes the ExternalIP by name.
+func (gce *GCEClient) RemoveExternalIP(name, region string) error {
+	op, err := gce.service.Addresses.Delete(gce.projectID, region, name).Do()
+	if err != nil {
+		if isHTTPErrorCode(err, http.StatusNotFound) {
+			return nil
+		}
+		return err
+	}
+	return gce.waitForRegionOp(op, region)
+}
+
 // GetTargetPool gets the list of instances in a targetpool
 func (gce *GCEClient) GetTargetPool(region, name string) (*compute.TargetPool, error) {
 	tp, err := gce.service.TargetPools.Get(gce.projectID, region, name).Do()
@@ -273,6 +285,18 @@ func (gce *GCEClient) CreateTargetPool(region, name string, instances []string) 
 		return nil, err
 	}
 	return tp, nil
+}
+
+// RemoveTargetPool deletes the TargetPool by name.
+func (gce *GCEClient) RemoveTargetPool(name, region string) error {
+	op, err := gce.service.TargetPools.Delete(gce.projectID, region, name).Do()
+	if err != nil {
+		if isHTTPErrorCode(err, http.StatusNotFound) {
+			return nil
+		}
+		return err
+	}
+	return gce.waitForRegionOp(op, region)
 }
 
 // GetAvailableZones returns all available zones for this project
@@ -319,6 +343,18 @@ func (gce *GCEClient) CreateForwardingRule(region, name, address, port string) (
 		return nil, err
 	}
 	return fr, nil
+}
+
+// RemoveForwardingRule deletes the GlobalForwardingRule by name.
+func (gce *GCEClient) RemoveForwardingRule(name, region string) error {
+	op, err := gce.service.ForwardingRules.Delete(gce.projectID, region, name).Do()
+	if err != nil {
+		if isHTTPErrorCode(err, http.StatusNotFound) {
+			return nil
+		}
+		return err
+	}
+	return gce.waitForRegionOp(op, region)
 }
 
 // makeFirewallObject returns a pre-populated instance of *computeFirewall

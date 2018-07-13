@@ -41,6 +41,7 @@ type loadBalancer struct {
 // Cloud interface
 type Cloud interface {
 	CreateLoadBalancer(cfg *Config) error
+	RemoveLoadBalancer(cfg *Config, force bool) error
 }
 
 func (c *gceCloud) CreateLoadBalancer(cfg *Config) error {
@@ -59,11 +60,13 @@ func (c *gceCloud) CreateLoadBalancer(cfg *Config) error {
 		return err
 	}
 	if c.externalAddress == nil {
-		fmt.Printf("====> Creating External Address:")
 		c.externalAddress, err = c.client.CreateExternalIP(cfg.Region, cfg.Name)
-		return err
+		fmt.Printf("====> Created External Address.")
+		if err != nil {
+			return err
+		}
 	} else {
-		fmt.Printf("====> Using Existing External Address:")
+		fmt.Printf("====> Used Existing External Address:")
 	}
 	fmt.Printf(" %s - %s\n", cfg.Name, c.externalAddress.Address)
 
@@ -126,6 +129,33 @@ func (c *gceCloud) CreateLoadBalancer(cfg *Config) error {
 		fmt.Printf("====> Using Existing Forwarding Rule: %s\n", cfg.Name)
 	}
 	fmt.Println("--> Done.")
+	return nil
+}
+
+func (c *gceCloud) RemoveLoadBalancer(cfg *Config, force bool) error {
+	fmt.Printf("Deleting a Loadbalancer for instances with labels %s\n", strings.Join(cfg.Labels, ", "))
+	var err error
+
+	fmt.Println("--> Deleting Forwarding Rule")
+	if err = c.client.RemoveForwardingRule(cfg.Name, cfg.Region); err != nil {
+		return err
+	}
+
+	fmt.Printf("--> Delete Target Pool %s\n", cfg.Name)
+	if err = c.client.RemoveTargetPool(cfg.Name, cfg.Region); err != nil {
+		return err
+	}
+
+	fmt.Println("--> Deleting Firewall Rule")
+	if err = c.client.RemoveFirewall(cfg.Name); err != nil {
+		return err
+	}
+	if force {
+		fmt.Println("--> Deleting External IP")
+		if err = c.client.RemoveExternalIP(cfg.Address, cfg.Region); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
