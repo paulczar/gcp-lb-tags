@@ -1,0 +1,52 @@
+apiVersion: v1
+data:
+  credentials.json: <output of cat /path/to/google/credentials.json | base64 -w0>
+kind: Secret
+metadata:
+  labels:
+  name: gcp-lb-tags
+  namespace: pks-system
+type: Opaque
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/instance: gcp-lb-tags
+    app.kubernetes.io/name: gcp-lb-tags
+  name: gcp-lb-tags
+  namespace: pks-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: gcp-lb-tags
+      app.kubernetes.io/name: gcp-lb-tags
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: gcp-lb-tags
+        app.kubernetes.io/name: gcp-lb-tags
+    spec:
+      containers:
+      - command: ["/app/pks.sh"]
+        image: paulczar/gcp-lb-tags:latest
+        imagePullPolicy: Always
+        name: gcp-lb-tags
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value : /google/credentials.json
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - mountPath: /google
+          name: google-credentials
+      volumes:
+      - name: google-credentials
+        secret:
+          secretName: gcp-lb-tags

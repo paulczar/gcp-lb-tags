@@ -5,8 +5,10 @@ COPY . .
 RUN go-wrapper download
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /app/gcp-lb-tags .
 
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
+FROM ubuntu:latest
+RUN apt-get update && apt-get install -yq curl
 WORKDIR /app
 COPY --from=0 /app /app
-CMD ["/app/gcp-lb-tags", "run"]
+COPY pks.sh /app/pks.sh
+
+CMD ["/app/gcp-lb-tags", "create"]
